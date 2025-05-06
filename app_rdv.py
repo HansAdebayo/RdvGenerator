@@ -1,7 +1,9 @@
-# === PARTIE STREAMLIT ===
 import streamlit as st
+from datetime import datetime, timedelta
 import tempfile
 import shutil
+import os
+# Et tes fonctions importées ou définies ici
 
 # Cette ligne DOIT être la première commande Streamlit
 st.set_page_config(page_title="📅 RDV - Générateur de rapports", layout="centered")

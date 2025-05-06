@@ -1,21 +1,21 @@
+# === LOGIQUE MÉTIER ===
 import pandas as pd
 from datetime import datetime, timedelta
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import os
 import locale
 import unicodedata
-import streamlit as st
 
+# Gestion robuste de la locale
 try:
     locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
 except locale.Error:
-    st.warning("⚠️ La locale française n'est pas disponible sur ce système. Les mois resteront en anglais.")
+    pass  # On n'affiche pas de st.warning ici (hors Streamlit)
 
 
 def normalize(text):

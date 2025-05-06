@@ -1,10 +1,9 @@
+# === PARTIE STREAMLIT ===
 import streamlit as st
-from datetime import datetime
 import tempfile
-import os
 import shutil
-from rdv_generator import load_rdv_data, filter_rdv, create_word_report
 
+# Cette ligne DOIT être la première commande Streamlit
 st.set_page_config(page_title="📅 RDV - Générateur de rapports", layout="centered")
 
 st.title("📅 Générateur de rapports de rendez-vous")
@@ -34,14 +33,19 @@ if uploaded_rdv and st.button("🚀 Générer les rapports RDV"):
                 with open(logo_path, "wb") as f:
                     f.write(uploaded_logo.read())
 
-            df = load_rdv_data(rdv_path)
-            filtered = filter_rdv(df, report_date, report_date + timedelta(days=15))
-            grouped = filtered.groupby('Commercial')
+            try:
+                df = load_rdv_data(rdv_path)
+                filtered = filter_rdv(df, report_date, report_date + timedelta(days=15))
+                if 'Commercial' not in filtered.columns:
+                    st.error("❌ La colonne 'Commercial' est absente du fichier.")
+                else:
+                    grouped = filtered.groupby('Commercial')
+                    output_dir = os.path.join(temp_dir, "rapports")
+                    for commercial, group in grouped:
+                        create_word_report(commercial, group, logo_path, report_date, output_dir)
 
-            output_dir = os.path.join(temp_dir, "rapports")
-            for commercial, group in grouped:
-                create_word_report(commercial, group, logo_path, report_date, output_dir)
-
-            zip_path = shutil.make_archive(os.path.join(temp_dir, "Rapports_RDV"), 'zip', output_dir)
-            st.success("✅ Rapports générés avec succès.")
-            st.download_button("📥 Télécharger le ZIP", open(zip_path, "rb"), file_name="Rapports_RDV.zip")
+                    zip_path = shutil.make_archive(os.path.join(temp_dir, "Rapports_RDV"), 'zip', output_dir)
+                    st.success("✅ Rapports générés avec succès.")
+                    st.download_button("📥 Télécharger le ZIP", open(zip_path, "rb"), file_name="Rapports_RDV.zip")
+            except Exception as e:
+                st.error(f"❌ Une erreur est survenue : {e}")

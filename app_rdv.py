@@ -1,50 +1,47 @@
 import streamlit as st
+from datetime import datetime
 import tempfile
 import os
-from datetime import datetime
-from rdv_generator import load_rdv_data, filter_rdv, generate_rdv_report
+import shutil
+from rdv_generator import load_rdv_data, filter_rdv, create_word_report
 
-st.set_page_config(page_title="Rapport RDV", layout="centered")
-st.title("📅 Générateur de rapports de rendez-vous commerciaux")
+st.set_page_config(page_title="📅 RDV - Générateur de rapports", layout="centered")
 
-uploaded_file = st.file_uploader("📁 Importer le fichier des RDV", type=["xlsx"])
-uploaded_logo = st.file_uploader("🖼️ Logo (optionnel)", type=["png", "jpg", "jpeg"])
+st.title("📅 Générateur de rapports de rendez-vous")
+
+uploaded_rdv = st.file_uploader("📁 Fichier des rendez-vous", type=["xlsx"])
+uploaded_logo = st.file_uploader("🖼️ Logo (facultatif)", type=["png", "jpg", "jpeg"])
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    annee = st.number_input("📆 Année", min_value=2020, max_value=2100, value=datetime.now().year)
+    jour = st.number_input("📆 Jour", min_value=1, max_value=31, value=datetime.now().day)
 with col2:
-    mois = st.number_input("🗓 Mois", min_value=1, max_value=12, value=datetime.now().month)
+    mois = st.selectbox("📅 Mois", list(range(1, 13)), index=datetime.now().month - 1)
 with col3:
-    jour_range = st.slider("📍 Intervalle de jours", 1, 31, (1, 31))
+    annee = st.selectbox("📆 Année", list(range(2022, 2030)), index=2)
 
-if uploaded_file:
-    if st.button("🚀 Générer les rapports"):
-        with st.spinner("Traitement en cours..."):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                file_path = os.path.join(tmpdir, "rdv.xlsx")
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.read())
+if uploaded_rdv and st.button("🚀 Générer les rapports RDV"):
+    with st.spinner("📄 Génération des rapports en cours..."):
+        report_date = datetime(annee, mois, jour)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rdv_path = os.path.join(temp_dir, "rdv.xlsx")
+            with open(rdv_path, "wb") as f:
+                f.write(uploaded_rdv.read())
 
-                logo_path = None
-                if uploaded_logo:
-                    logo_path = os.path.join(tmpdir, uploaded_logo.name)
-                    with open(logo_path, "wb") as f:
-                        f.write(uploaded_logo.read())
+            logo_path = None
+            if uploaded_logo:
+                logo_path = os.path.join(temp_dir, uploaded_logo.name)
+                with open(logo_path, "wb") as f:
+                    f.write(uploaded_logo.read())
 
-                df, col_com, col_reason, col_address = load_rdv_data(file_path)
-                filtered = filter_rdv(df, annee, mois, jour_range[0], jour_range[1])
-                grouped = filtered.groupby(col_com)
+            df = load_rdv_data(rdv_path)
+            filtered = filter_rdv(df, report_date, report_date + timedelta(days=15))
+            grouped = filtered.groupby('Commercial')
 
-                output_dir = os.path.join(tmpdir, "outputs")
-                fichiers = []
+            output_dir = os.path.join(temp_dir, "rapports")
+            for commercial, group in grouped:
+                create_word_report(commercial, group, logo_path, report_date, output_dir)
 
-                for commercial, group in grouped:
-                    path = generate_rdv_report(commercial, group, logo_path, datetime.now(), col_reason, col_address, output_dir)
-                    fichiers.append(path)
-
-                for f in fichiers:
-                    with open(f, "rb") as file:
-                        st.download_button(f"📥 Télécharger {os.path.basename(f)}", file, file_name=os.path.basename(f))
-
-        st.success("✅ Rapports générés avec succès.")
+            zip_path = shutil.make_archive(os.path.join(temp_dir, "Rapports_RDV"), 'zip', output_dir)
+            st.success("✅ Rapports générés avec succès.")
+            st.download_button("📥 Télécharger le ZIP", open(zip_path, "rb"), file_name="Rapports_RDV.zip")

@@ -10,8 +10,12 @@ from docx.oxml.ns import qn
 import os
 import locale
 import unicodedata
+import streamlit as st
 
-locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
+try:
+    locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
+except locale.Error:
+    st.warning("⚠️ La locale française n'est pas disponible sur ce système. Les mois resteront en anglais.")
 
 
 def normalize(text):

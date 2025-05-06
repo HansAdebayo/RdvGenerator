@@ -1,26 +1,20 @@
-# === LOGIQUE MÉTIER ===
+
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from docx import Document
-from docx.shared import Inches
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.shared import Inches, Pt
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import os
-import locale
 import unicodedata
 
-# Gestion robuste de la locale
-try:
-    locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
-except locale.Error:
-    pass  # On n'affiche pas de st.warning ici (hors Streamlit)
-
+def sanitize_filename(name):
+    return name.replace(" ", "_").replace("/", "-")
 
 def normalize(text):
-    return ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn').lower()
-
+    return ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn').lower().replace('_', ' ').replace('-', ' ')
 
 def detect_column(columns, keyword):
     keyword_norm = normalize(keyword)
@@ -29,86 +23,99 @@ def detect_column(columns, keyword):
             return col
     return None
 
-
-def sanitize_filename(name):
-    return name.replace(" ", "_").replace("/", "-")
-
-
-def load_rdv_data(path):
+def load_rdv_data(path, jour_debut, jour_fin, mois, annee):
     df = pd.read_excel(path)
-    year_col = detect_column(df.columns, "annee")
-    month_col = detect_column(df.columns, "mois")
-    day_col = detect_column(df.columns, "jour")
+    col_annee = detect_column(df.columns, "annee")
+    col_mois = detect_column(df.columns, "mois")
+    col_jour = detect_column(df.columns, "jour")
+    col_com = detect_column(df.columns, "commercial")
 
-    if not all([year_col, month_col, day_col]):
-        raise ValueError("Les colonnes année, mois et jour sont requises.")
+    if not all([col_annee, col_mois, col_jour, col_com]):
+        return {}
 
-    df['Date_RDV'] = pd.to_datetime(dict(
-        year=df[year_col],
-        month=df[month_col],
-        day=df[day_col]
+    df['date'] = pd.to_datetime(dict(
+        year=df[col_annee],
+        month=df[col_mois],
+        day=df[col_jour]
     ))
 
-    return df
+    df_filtre = df[
+        (df[col_annee] == annee) &
+        (df[col_mois] == mois) &
+        (df[col_jour] >= jour_debut) &
+        (df[col_jour] <= jour_fin)
+    ]
 
+    if df_filtre.empty:
+        return {}
 
-def filter_rdv(df, start_date, end_date):
-    return df[(df['Date_RDV'] >= start_date) & (df['Date_RDV'] <= end_date)]
+    return dict(tuple(df_filtre.groupby(col_com)))
 
+def creer_rapport_rdv(df, commercial, jour_debut, jour_fin, mois, annee, output_dir, logo_path=None):
+    doc = Document()
 
-def add_logo_and_header(doc, logo_path, commercial_name, report_date):
-    header = doc.sections[0].header
-    paragraph = header.paragraphs[0]
+    # Page de garde
+    section = doc.sections[0]
+    section.different_first_page_header_footer = True
+    doc._body.clear_content()
 
     if logo_path and os.path.exists(logo_path):
-        run = paragraph.add_run()
-        run.add_picture(logo_path, width=Inches(1.5))
+        p_logo = doc.add_paragraph()
+        run = p_logo.add_run()
+        run.add_picture(logo_path, width=Inches(2))
+        p_logo.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
 
-    paragraph.add_run(f"   Compte rendu du {report_date.strftime('%d %B %Y')} – Réunion commerciale {commercial_name}")
-    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+    titre = doc.add_paragraph()
+    titre_run = titre.add_run("RAPPORT RDV COMMERCIAL")
+    titre_run.bold = True
+    titre_run.font.size = Pt(24)
+    titre.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
 
+    mois_nom = datetime(annee, mois, 1).strftime('%B')
+    info = doc.add_paragraph()
+    info.add_run("\nCommercial : ").bold = True
+    info.add_run(commercial + "\n")
+    info.add_run("Période : ").bold = True
+    info.add_run(f"du {jour_debut} au {jour_fin} {mois_nom} {annee}")
 
-def add_agenda_section(doc, start_date, end_date, rdv_data):
-    doc.add_paragraph(f"Date : {start_date.strftime('%d %B %Y')}\nRédacteur : Adeline et Laurent\nLieu : Visio")
-    doc.add_paragraph()
-    doc.add_heading("1- Agenda", level=1)
-    doc.add_paragraph(f"RDV Gecko Agenda du {start_date.strftime('%d %B %Y')} au {end_date.strftime('%d %B %Y')} :")
+    doc.add_page_break()
 
-    table = doc.add_table(rows=1, cols=3)
-    table.alignment = WD_TABLE_ALIGNMENT.LEFT
-    table.style = 'Table Grid'
+    # En-tête
+    header = doc.sections[0].header
+    para = header.paragraphs[0]
+    if logo_path and os.path.exists(logo_path):
+        para.add_run().add_picture(logo_path, width=Inches(1.5))
+    para.add_run(f"   Compte rendu du {jour_debut} au {jour_fin} {mois_nom} {annee} – RDV de {commercial}")
+    para.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
 
-    headers = ['Date', 'Raison du RDV', 'Adresse du RDV']
-    hdr_cells = table.rows[0].cells
-    for i, head in enumerate(headers):
-        hdr_cells[i].text = head
-        shading_elm = OxmlElement('w:shd')
-        shading_elm.set(qn('w:fill'), 'D9E1F2')
-        hdr_cells[i]._tc.get_or_add_tcPr().append(shading_elm)
-        hdr_cells[i].paragraphs[0].runs[0].font.bold = True
-        hdr_cells[i].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    # Table des rendez-vous
+    doc.add_heading("Rendez-vous", level=1)
+    if df.empty:
+        doc.add_paragraph("Aucun rendez-vous trouvé pour cette période.", style="Intense Quote")
+    else:
+        col_date = detect_column(df.columns, "date")
+        col_raison = detect_column(df.columns, "raison")
+        col_adresse = detect_column(df.columns, "adresse")
 
-    col_raison = detect_column(rdv_data.columns, "raison")
-    col_adresse = detect_column(rdv_data.columns, "adresse")
-
-    for _, row in rdv_data.iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = row['Date_RDV'].strftime('%d/%m/%Y')
-        row_cells[1].text = str(row[col_raison]) if col_raison else ''
-        row_cells[2].text = str(row[col_adresse]) if col_adresse and pd.notnull(row[col_adresse]) else 'Non précisé'
-        for cell in row_cells:
+        table = doc.add_table(rows=1, cols=3)
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        table.style = 'Table Grid'
+        headers = ['Date', 'Raison du RDV', 'Adresse']
+        for i, h in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.text = h
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            shade = OxmlElement('w:shd')
+            shade.set(qn('w:fill'), 'D9E1F2')
+            cell._tc.get_or_add_tcPr().append(shade)
 
-
-def create_word_report(commercial, rdv_df, logo_path, report_date, output_dir):
-    doc = Document()
-    add_logo_and_header(doc, logo_path, commercial, report_date)
-    doc.add_paragraph()
-    end_date = report_date + timedelta(days=15)
-    add_agenda_section(doc, report_date, end_date, rdv_df)
+        for _, row in df.iterrows():
+            cells = table.add_row().cells
+            cells[0].text = row[col_date].strftime("%d/%m/%Y") if pd.notnull(row[col_date]) else ""
+            cells[1].text = str(row[col_raison]) if col_raison else ""
+            cells[2].text = str(row[col_adresse]) if col_adresse else ""
 
     os.makedirs(output_dir, exist_ok=True)
-    filename = f"RDV_{sanitize_filename(commercial)}_{report_date.strftime('%Y-%m-%d')}.docx"
-    path = os.path.join(output_dir, filename)
-    doc.save(path)
-    return path
+    filename = f"{output_dir}/RDV_{sanitize_filename(commercial)}_{mois:02d}_{annee}.docx"
+    doc.save(filename)
+    return filename
